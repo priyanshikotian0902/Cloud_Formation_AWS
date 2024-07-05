@@ -1,0 +1,85 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Attach existing EC2 instance to an Auto Scaling Group and associate with an ALB
+
+Resources:
+  MySecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "My Security Group"
+      SecurityGroupIngress:
+        - IpProtocol: "tcp"
+          FromPort: "8089"
+          ToPort: "8089"
+          CidrIp: "0.0.0.0/0" # Adjust as needed
+      VpcId: "vpc-0210fe01133a40cfa" # Specify your VPC ID
+
+  MyLaunchConfig:
+    Type: "AWS::AutoScaling::LaunchConfiguration"
+    Properties:
+      ImageId: "ami-001843b876406202a"
+      InstanceType: "t2.micro"
+      SecurityGroups:
+        - !Ref MySecurityGroup
+      UserData: 
+        Fn::Base64: |
+        #!/bin/bash
+        sudo su
+          yum update -y
+          yum install java-17-amazon-corretto-devel -y
+          yum install -y ruby
+          cd /home/ec2-user
+          wget https://aws-codedeploy-ap-south-1.s3.amazonaws.com/latest/install
+          chmod +x ./install
+          ./install auto
+          systemctl start codedeploy-agent
+          systemctl enable codedeploy-agent
+          yum install -y httpd
+          systemctl start httpd
+          systemctl enable httpd
+      KeyName: "key"
+      # Add any other properties needed for your instance
+
+  MyAutoScalingGroup:
+    Type: "AWS::AutoScaling::AutoScalingGroup"
+    Properties:
+      LaunchConfigurationName: !Ref MyLaunchConfig
+      MinSize: 1
+      MaxSize: 3
+      DesiredCapacity: 1
+      AvailabilityZones: 
+        - "ap-south-1" # specify AZ of your existing instance
+      # Add any other properties for your ASG
+
+  MyLoadBalancer:
+    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    Properties:
+      Name: "my-alb"
+      Scheme: "internet-facing"
+      Subnets:
+        - "subnet-05ea06027db21f464" # Specify your subnet IDs
+        - "subnet-05ea06027db21f464"
+        - "subnet-02c5094f3a9639fde"
+      SecurityGroups:
+        - !Ref MySecurityGroup # Specify your ALB security group
+      Tags:
+        - Key: "Name"
+          Value: "my-alb"
+
+  MyTargetGroup:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
+      Name: "my-target-group"
+      Port: 8089
+      Protocol: "HTTP"
+      TargetType: "instance"
+      VpcId: "vpc-0210fe01133a40cfa" # Specify your VPC ID
+
+  MyListener:
+    Type: "AWS::ElasticLoadBalancingV2::Listener"
+    Properties:
+      DefaultActions:
+        - Type: "forward"
+          TargetGroupArn: !Ref MyTargetGroup
+      LoadBalancerArn: !Ref MyLoadBalancer
+      Port: 8089
+      Protocol: "HTTP"
